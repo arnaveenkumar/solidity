@@ -20,15 +20,19 @@
  */
 
 #include <test/EVMHost.h>
-
+#include <test/Common.h>
 #include <test/evmc/loader.h>
 
 #include <libevmasm/GasMeter.h>
+
+#include <liblangutil/Exceptions.h>
 
 #include <libsolutil/Exceptions.h>
 #include <libsolutil/Assertions.h>
 #include <libsolutil/Keccak256.h>
 #include <libsolutil/picosha2.h>
+
+#include <map>
 
 using namespace std;
 using namespace solidity;
@@ -36,17 +40,21 @@ using namespace solidity::util;
 using namespace solidity::test;
 using namespace evmc::literals;
 
-evmc::VM& EVMHost::getVM(string const& _path)
+evmc::VM& EVMHost::getVM(string _path)
 {
-	static evmc::VM theVM;
-	if (!theVM && !_path.empty())
+	static std::map<string, std::unique_ptr<evmc::VM>> vms;
+
+	if (_path.empty() && !solidity::test::CommonOptions::get().evmcPaths.empty())
+		_path = solidity::test::CommonOptions::get().evmcPaths.begin()->string();
+
+	if (vms.count(_path) == 0)
 	{
 		evmc_loader_error_code errorCode = {};
-		auto vm = evmc::VM{evmc_load_and_configure(_path.c_str(), &errorCode)};
+		auto vm = evmc_load_and_configure(_path.c_str(), &errorCode);
 		if (vm && errorCode == EVMC_LOADER_SUCCESS)
 		{
-			if (vm.get_capabilities() & EVMC_CAPABILITY_EVM1)
-				theVM = std::move(vm);
+			if (vm->get_capabilities(vm) & EVMC_CAPABILITY_EVM1)
+				vms[_path] = std::make_unique<evmc::VM>(vm);
 			else
 				cerr << "VM loaded does not support EVM1" << endl;
 		}
@@ -58,7 +66,12 @@ evmc::VM& EVMHost::getVM(string const& _path)
 			cerr << endl;
 		}
 	}
-	return theVM;
+
+	if (vms.count(_path) > 0)
+		return *vms[_path];
+
+	static evmc::VM NullVM(nullptr);
+	return NullVM;
 }
 
 EVMHost::EVMHost(langutil::EVMVersion _evmVersion, evmc::VM& _vm):
@@ -67,7 +80,7 @@ EVMHost::EVMHost(langutil::EVMVersion _evmVersion, evmc::VM& _vm):
 {
 	if (!m_vm)
 	{
-		cerr << "Unable to find evmone library" << endl;
+		cerr << "Unable to load evmc library" << endl;
 		assertThrow(false, Exception, "");
 	}
 

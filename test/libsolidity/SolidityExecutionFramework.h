@@ -42,8 +42,8 @@ class SolidityExecutionFramework: public solidity::test::ExecutionFramework
 
 public:
 	SolidityExecutionFramework(): m_showMetadata(solidity::test::CommonOptions::get().showMetadata) {}
-	explicit SolidityExecutionFramework(langutil::EVMVersion _evmVersion):
-		ExecutionFramework(_evmVersion), m_showMetadata(solidity::test::CommonOptions::get().showMetadata)
+	explicit SolidityExecutionFramework(langutil::EVMVersion _evmVersion, std::vector<boost::filesystem::path> const& _evmPaths = {}):
+		ExecutionFramework(_evmVersion, _evmPaths), m_showMetadata(solidity::test::CommonOptions::get().showMetadata)
 	{}
 
 	bytes const& compileAndRunWithoutCheck(

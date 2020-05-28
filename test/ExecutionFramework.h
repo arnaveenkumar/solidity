@@ -57,7 +57,7 @@ class ExecutionFramework
 
 public:
 	ExecutionFramework();
-	explicit ExecutionFramework(langutil::EVMVersion _evmVersion);
+	explicit ExecutionFramework(langutil::EVMVersion _evmVersion, std::vector<boost::filesystem::path> const& _evmPaths = {});
 	virtual ~ExecutionFramework() = default;
 
 	virtual bytes const& compileAndRunWithoutCheck(

@@ -43,12 +43,13 @@ ExecutionFramework::ExecutionFramework():
 {
 }
 
-ExecutionFramework::ExecutionFramework(langutil::EVMVersion _evmVersion):
+ExecutionFramework::ExecutionFramework(langutil::EVMVersion _evmVersion, std::vector<boost::filesystem::path> const& _evmPaths):
 	m_evmVersion(_evmVersion),
 	m_optimiserSettings(solidity::frontend::OptimiserSettings::minimal()),
-	m_showMessages(solidity::test::CommonOptions::get().showMessages),
-	m_evmHost(make_shared<EVMHost>(m_evmVersion))
+	m_showMessages(solidity::test::CommonOptions::get().showMessages)
 {
+	m_evmHost = make_shared<EVMHosts>(m_evmVersion, _evmPaths);
+
 	if (solidity::test::CommonOptions::get().optimize)
 		m_optimiserSettings = solidity::frontend::OptimiserSettings::standard();
 
