@@ -32,6 +32,7 @@
 #include <boost/algorithm/string/replace.hpp>
 
 #include <cstdlib>
+#include <tuple>
 
 using namespace std;
 using namespace solidity;
@@ -58,10 +59,11 @@ ExecutionFramework::ExecutionFramework(langutil::EVMVersion _evmVersion, std::ve
 
 void ExecutionFramework::reset()
 {
-	m_evmHost->reset();
-	for (size_t i = 0; i < 10; i++)
-		m_evmHost->accounts[EVMHost::convertToEVMC(account(i))].balance =
-			EVMHost::convertToEVMC(u256(1) << 100);
+	m_evmHost->forEach([&](EVMHost& _host) {
+		_host.reset();
+		for (size_t i = 0; i < 10; i++)
+			_host.accounts[EVMHost::convertToEVMC(account(i))].balance = EVMHost::convertToEVMC(u256(1) << 100);
+	});
 }
 
 std::pair<bool, string> ExecutionFramework::compareAndCreateMessage(
@@ -90,98 +92,183 @@ std::pair<bool, string> ExecutionFramework::compareAndCreateMessage(
 	return make_pair(false, message);
 }
 
-u256 ExecutionFramework::gasLimit() const
-{
-	return {m_evmHost->tx_context.block_gas_limit};
-}
+u256 ExecutionFramework::gasLimit() const { return {m_evmHost->tx_context.block_gas_limit}; }
 
-u256 ExecutionFramework::gasPrice() const
-{
-	return {EVMHost::convertFromEVMC(m_evmHost->tx_context.tx_gas_price)};
-}
+u256 ExecutionFramework::gasPrice() const { return {EVMHost::convertFromEVMC(m_evmHost->tx_context.tx_gas_price)}; }
 
 u256 ExecutionFramework::blockHash(u256 const& _number) const
 {
 	return {EVMHost::convertFromEVMC(m_evmHost->get_block_hash(uint64_t(_number & numeric_limits<uint64_t>::max())))};
 }
 
-u256 ExecutionFramework::blockNumber() const
-{
-	return m_evmHost->tx_context.block_number;
+u256 ExecutionFramework::blockNumber() const {
+	return m_evmHost->forEach<u256>([](EVMHost& _host) {
+		return _host.tx_context.block_number;
+	});
 }
 
-void ExecutionFramework::sendMessage(bytes const& _data, bool _isCreation, u256 const& _value)
+void ExecutionFramework::sendCreationMessage(
+	ContractBytecode const& _contractBytecode, bytes const& _arguments, u256 const& _value)
 {
-	m_evmHost->newBlock();
+	m_evmHost->forEach([&](EVMHost& _host) {
+		_host.newBlock();
 
-	if (m_showMessages)
-	{
-		if (_isCreation)
+		bytes _data;
+
+		if (_host.executesEvmBytecode())
+			_data = _contractBytecode.evmBytecode + _arguments;
+	  	if (_host.executesEwasmBytecode())
+			_data = _contractBytecode.ewasmBytecode + _arguments;
+
+		if (m_showMessages)
+		{
+			cout << "EVMC VM: " << _host.toString() << std::endl;
 			cout << "CREATE " << m_sender.hex() << ":" << endl;
-		else
-			cout << "CALL   " << m_sender.hex() << " -> " << m_contractAddress.hex() << ":" << endl;
-		if (_value > 0)
-			cout << " value: " << _value << endl;
-		cout << " in:      " << toHex(_data) << endl;
-	}
-	evmc_message message = {};
-	message.input_data = _data.data();
-	message.input_size = _data.size();
-	message.sender = EVMHost::convertToEVMC(m_sender);
-	message.value = EVMHost::convertToEVMC(_value);
+			if (_value > 0)
+				cout << " value: " << _value << endl;
+			cout << " in:      " << toHex(_data) << endl;
+		}
+		evmc_message message = {};
+		message.input_data = _data.data();
+		message.input_size = _data.size();
+		message.sender = EVMHost::convertToEVMC(m_sender);
+		message.value = EVMHost::convertToEVMC(_value);
 
-	if (_isCreation)
-	{
 		message.kind = EVMC_CREATE;
 		message.destination = EVMHost::convertToEVMC(Address{});
-	}
-	else
-	{
-		message.kind = EVMC_CALL;
-		message.destination = EVMHost::convertToEVMC(m_contractAddress);
-	}
-	message.gas = m_gas.convert_to<int64_t>();
+		message.gas = m_gas.convert_to<int64_t>();
 
-	evmc::result result = m_evmHost->call(message);
+		evmc::result result = _host.call(message);
 
-	m_output = bytes(result.output_data, result.output_data + result.output_size);
-	if (_isCreation)
+		m_output = bytes(result.output_data, result.output_data + result.output_size);
 		m_contractAddress = EVMHost::convertFromEVMC(result.create_address);
 
-	m_gasUsed = m_gas - result.gas_left;
-	m_transactionSuccessful = (result.status_code == EVMC_SUCCESS);
+		m_gasUsed = m_gas - result.gas_left;
+		m_transactionSuccessful = (result.status_code == EVMC_SUCCESS);
 
-	if (m_showMessages)
+		if (m_showMessages)
+		{
+			cout << " out:     " << toHex(m_output) << endl;
+			cout << " result: " << size_t(result.status_code) << endl;
+			cout << " gas used: " << m_gasUsed.str() << endl;
+		}
+	});
+}
+
+void ExecutionFramework::sendMessage(bytes const& _data, u256 const& _value)
+{
+	std::vector<std::tuple<evmc_tx_context, evmc::result, bytes, u256, bool>> results;
+	solAssert(m_evmHost->size() > 0, "");
+	m_evmHost->forEach([&](EVMHost& _host) {
+		_host.newBlock();
+
+		if (m_showMessages)
+		{
+			cout << "EVMC VM: " << _host.toString() << std::endl;
+			cout << "CALL   " << m_sender.hex() << " -> " << m_contractAddress.hex() << ":" << endl;
+			if (_value > 0)
+				cout << " value: " << _value << endl;
+			cout << " in:      " << toHex(_data) << endl;
+		}
+		evmc_message message = {};
+		message.input_data = _data.data();
+		message.input_size = _data.size();
+		message.sender = EVMHost::convertToEVMC(m_sender);
+		message.value = EVMHost::convertToEVMC(_value);
+
+		message.kind = EVMC_CALL;
+		message.destination = EVMHost::convertToEVMC(m_contractAddress);
+
+		message.gas = m_gas.convert_to<int64_t>();
+
+		evmc::result result = _host.call(message);
+		bytes output = bytes(result.output_data, result.output_data + result.output_size);
+		u256 gasUsed = m_gas - result.gas_left;
+
+		bool transactionSuccessful = (result.status_code == EVMC_SUCCESS);
+
+		if (m_showMessages)
+		{
+			cout << " EVMC VM: " << _host.toString() << std::endl;
+			cout << " out:     " << toHex(output) << endl;
+			cout << " result: " << size_t(result.status_code) << endl;
+			cout << " gas used: " << gasUsed.str() << endl;
+		}
+
+		results.emplace_back(
+			std::make_tuple(_host.tx_context, std::move(result), output, gasUsed, transactionSuccessful));
+	});
+	solAssert(results.size() > 0, "");
+
+	bool same = true;
+	for (auto& result: results)
 	{
-		cout << " out:     " << toHex(m_output) << endl;
-		cout << " result: " << size_t(result.status_code) << endl;
-		cout << " gas used: " << m_gasUsed.str() << endl;
+		if (&result == &*results.begin())
+			continue;
+
+		// todo: check transaction context
+
+		if (std::get<1>(result).output_size != std::get<1>(*results.begin()).output_size)
+			same = false;
+		if (std::get<1>(result).output_size > 0 && std::get<1>(result).output_data != nullptr
+			&& std::get<1>(*results.begin()).output_data != nullptr
+			&& ::strncmp(
+				   (const char*) std::get<1>(result).output_data,
+				   (const char*) std::get<1>(*results.begin()).output_data,
+				   std::get<1>(result).output_size)
+				   != 0)
+			same = false;
+		if (std::get<1>(result).status_code != std::get<1>(*results.begin()).status_code)
+			same = false;
+		if (::strncmp(
+				(const char*) std::get<1>(result).create_address.bytes,
+				(const char*) std::get<1>(*results.begin()).create_address.bytes,
+				20))
+			same = false;
+		if (std::get<1>(result).gas_left != std::get<1>(*results.begin()).gas_left)
+			same = false;
+		if (std::get<2>(result) != std::get<2>(*results.begin()))
+			same = false;
+		if (std::get<3>(result) != std::get<3>(*results.begin()))
+			same = false;
+		if (std::get<4>(result) != std::get<4>(*results.begin()))
+			same = false;
+		if (!same)
+			break;
 	}
+	solAssert(same, "different results returned by different evmc vm's.");
+
+	m_evmHost->tx_context = std::get<0>(*results.begin());
+	m_output = std::get<2>(*results.begin());
+	m_gasUsed = std::get<3>(*results.begin());
+	m_transactionSuccessful = std::get<4>(*results.begin());
 }
 
 void ExecutionFramework::sendEther(Address const& _addr, u256 const& _amount)
 {
-	m_evmHost->newBlock();
+	m_evmHost->forEach([&](EVMHost& _host) {
+		_host.newBlock();
 
-	if (m_showMessages)
-	{
-		cout << "SEND_ETHER   " << m_sender.hex() << " -> " << _addr.hex() << ":" << endl;
-		if (_amount > 0)
-			cout << " value: " << _amount << endl;
-	}
-	evmc_message message = {};
-	message.sender = EVMHost::convertToEVMC(m_sender);
-	message.value = EVMHost::convertToEVMC(_amount);
-	message.kind = EVMC_CALL;
-	message.destination = EVMHost::convertToEVMC(_addr);
-	message.gas = m_gas.convert_to<int64_t>();
+		if (m_showMessages)
+		{
+			cout << "SEND_ETHER   " << m_sender.hex() << " -> " << _addr.hex() << ":" << endl;
+			if (_amount > 0)
+				cout << " value: " << _amount << endl;
+		}
+		evmc_message message = {};
+		message.sender = EVMHost::convertToEVMC(m_sender);
+		message.value = EVMHost::convertToEVMC(_amount);
+		message.kind = EVMC_CALL;
+		message.destination = EVMHost::convertToEVMC(_addr);
+		message.gas = m_gas.convert_to<int64_t>();
 
-	m_evmHost->call(message);
+		_host.call(message);
+	});
 }
 
 size_t ExecutionFramework::currentTimestamp()
 {
-	return m_evmHost->tx_context.block_timestamp;
+	return m_evmHost->forEach<int64_t>([](EVMHost& _host) -> int64_t { return _host.tx_context.block_timestamp; });
 }
 
 size_t ExecutionFramework::blockTimestamp(u256 _block)
@@ -199,12 +286,13 @@ Address ExecutionFramework::account(size_t _idx)
 
 bool ExecutionFramework::addressHasCode(Address const& _addr)
 {
-	return m_evmHost->get_code_size(EVMHost::convertToEVMC(_addr)) != 0;
+	return m_evmHost->forEach<bool>(
+		[&_addr](EVMHost& _host) -> bool { return _host.get_code_size(EVMHost::convertToEVMC(_addr)) != 0; });
 }
 
 size_t ExecutionFramework::numLogs() const
 {
-	return m_evmHost->recorded_logs.size();
+	return m_evmHost->forEach<size_t>([](EVMHost& _host) -> bool { return _host.recorded_logs.size(); });
 }
 
 size_t ExecutionFramework::numLogTopics(size_t _logIdx) const
@@ -232,7 +320,9 @@ bytes ExecutionFramework::logData(size_t _logIdx) const
 
 u256 ExecutionFramework::balanceAt(Address const& _addr)
 {
-	return u256(EVMHost::convertFromEVMC(m_evmHost->get_balance(EVMHost::convertToEVMC(_addr))));
+	return m_evmHost->forEach<u256>([&](EVMHost& _host) {
+		return u256(EVMHost::convertFromEVMC(_host.get_balance(EVMHost::convertToEVMC(_addr))));
+	});
 }
 
 bool ExecutionFramework::storageEmpty(Address const& _addr)

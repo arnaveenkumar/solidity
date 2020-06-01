@@ -43,7 +43,7 @@ namespace solidity::frontend::test
 class OptimizerTestFramework: public SolidityExecutionFramework
 {
 public:
-	bytes const& compileAndRunWithOptimizer(
+	solidity::test::ContractBytecode compileAndRunWithOptimizer(
 		std::string const& _sourceCode,
 		u256 const& _value = 0,
 		std::string const& _contractName = "",
@@ -56,7 +56,7 @@ public:
 		// "minimal" / "standard".
 		m_optimiserSettings = _optimize ? OptimiserSettings::full() : OptimiserSettings::none();
 		m_optimiserSettings.expectedExecutionsPerDeployment = _optimizeRuns;
-		bytes const& ret = compileAndRun(_sourceCode, _value, _contractName);
+		solidity::test::ContractBytecode ret = compileAndRun(_sourceCode, _value, _contractName);
 		m_optimiserSettings = std::move(previousSettings);
 		return ret;
 	}
@@ -72,8 +72,8 @@ public:
 		m_nonOptimizedBytecode = compileAndRunWithOptimizer("pragma solidity >=0.0;\n" + _sourceCode, _value, _contractName, false, _optimizeRuns);
 		m_nonOptimizedContract = m_contractAddress;
 		m_optimizedBytecode = compileAndRunWithOptimizer("pragma solidity >=0.0;\n" + _sourceCode, _value, _contractName, true, _optimizeRuns);
-		size_t nonOptimizedSize = numInstructions(m_nonOptimizedBytecode);
-		size_t optimizedSize = numInstructions(m_optimizedBytecode);
+		size_t nonOptimizedSize = numInstructions(m_nonOptimizedBytecode.evmBytecode);
+		size_t optimizedSize = numInstructions(m_optimizedBytecode.evmBytecode);
 		BOOST_CHECK_MESSAGE(
 			_optimizeRuns < 50 || optimizedSize < nonOptimizedSize,
 			string("Optimizer did not reduce bytecode size. Non-optimized size: ") +
@@ -116,8 +116,8 @@ public:
 protected:
 	u256 m_gasUsedOptimized;
 	u256 m_gasUsedNonOptimized;
-	bytes m_nonOptimizedBytecode;
-	bytes m_optimizedBytecode;
+	solidity::test::ContractBytecode m_nonOptimizedBytecode;
+	solidity::test::ContractBytecode m_optimizedBytecode;
 	Address m_optimizedContract;
 	Address m_nonOptimizedContract;
 };
@@ -282,9 +282,9 @@ BOOST_AUTO_TEST_CASE(retain_information_in_branches)
 	compareVersions("f(uint256,bytes32)", 8, "def");
 	compareVersions("f(uint256,bytes32)", 10, "ghi");
 
-	bytes optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "c", true);
+	solidity::test::ContractBytecode optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "c", true);
 	size_t numSHA3s = 0;
-	eachInstruction(optimizedBytecode, [&](Instruction _instr, u256 const&) {
+	eachInstruction(optimizedBytecode.evmBytecode, [&](Instruction _instr, u256 const&) {
 		if (_instr == Instruction::KECCAK256)
 			numSHA3s++;
 	});
@@ -325,9 +325,9 @@ BOOST_AUTO_TEST_CASE(store_tags_as_unions)
 	compileBothVersions(sourceCode);
 	compareVersions("f(uint256,bytes32)", 7, "abc");
 
-	bytes optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "test", true);
+	solidity::test::ContractBytecode optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "test", true);
 	size_t numSHA3s = 0;
-	eachInstruction(optimizedBytecode, [&](Instruction _instr, u256 const&) {
+	eachInstruction(optimizedBytecode.evmBytecode, [&](Instruction _instr, u256 const&) {
 		if (_instr == Instruction::KECCAK256)
 			numSHA3s++;
 	});
@@ -408,24 +408,24 @@ BOOST_AUTO_TEST_CASE(computing_constants)
 	compareVersions("set()");
 	compareVersions("get()");
 
-	bytes optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "C", true, 1);
+	solidity::test::ContractBytecode optimizedBytecode = compileAndRunWithOptimizer(sourceCode, 0, "C", true, 1);
 	bytes complicatedConstant = toBigEndian(u256("0x817416927846239487123469187231298734162934871263941234127518276"));
 	unsigned occurrences = 0;
-	for (auto iter = optimizedBytecode.cbegin(); iter < optimizedBytecode.cend(); ++occurrences)
+	for (auto iter = optimizedBytecode.evmBytecode.cbegin(); iter < optimizedBytecode.evmBytecode.cend(); ++occurrences)
 	{
-		iter = search(iter, optimizedBytecode.cend(), complicatedConstant.cbegin(), complicatedConstant.cend());
-		if (iter < optimizedBytecode.cend())
+		iter = search(iter, optimizedBytecode.evmBytecode.cend(), complicatedConstant.cbegin(), complicatedConstant.cend());
+		if (iter < optimizedBytecode.evmBytecode.cend())
 			++iter;
 	}
 	BOOST_CHECK_EQUAL(2, occurrences);
 
 	bytes constantWithZeros = toBigEndian(u256("0x77abc0000000000000000000000000000000000000000000000000000000001"));
 	BOOST_CHECK(search(
-		optimizedBytecode.cbegin(),
-		optimizedBytecode.cend(),
+		optimizedBytecode.evmBytecode.cbegin(),
+		optimizedBytecode.evmBytecode.cend(),
 		constantWithZeros.cbegin(),
 		constantWithZeros.cend()
-	) == optimizedBytecode.cend());
+	) == optimizedBytecode.evmBytecode.cend());
 }
 
 
@@ -632,8 +632,8 @@ BOOST_AUTO_TEST_CASE(optimise_multi_stores)
 	)";
 	compileBothVersions(sourceCode);
 	compareVersions("f()");
-	BOOST_CHECK_EQUAL(numInstructions(m_nonOptimizedBytecode, Instruction::SSTORE), 9);
-	BOOST_CHECK_EQUAL(numInstructions(m_optimizedBytecode, Instruction::SSTORE), 8);
+	BOOST_CHECK_EQUAL(numInstructions(m_nonOptimizedBytecode.evmBytecode, Instruction::SSTORE), 9);
+	BOOST_CHECK_EQUAL(numInstructions(m_optimizedBytecode.evmBytecode, Instruction::SSTORE), 8);
 }
 
 BOOST_AUTO_TEST_CASE(optimise_constant_to_codecopy)
@@ -669,8 +669,8 @@ BOOST_AUTO_TEST_CASE(optimise_constant_to_codecopy)
 	compareVersions("h()");
 	compareVersions("i()");
 	// This is counting in the deployed code.
-	BOOST_CHECK_EQUAL(numInstructions(m_nonOptimizedBytecode, Instruction::CODECOPY), 0);
-	BOOST_CHECK_EQUAL(numInstructions(m_optimizedBytecode, Instruction::CODECOPY), 4);
+	BOOST_CHECK_EQUAL(numInstructions(m_nonOptimizedBytecode.evmBytecode, Instruction::CODECOPY), 0);
+	BOOST_CHECK_EQUAL(numInstructions(m_optimizedBytecode.evmBytecode, Instruction::CODECOPY), 4);
 }
 
 BOOST_AUTO_TEST_CASE(byte_access)

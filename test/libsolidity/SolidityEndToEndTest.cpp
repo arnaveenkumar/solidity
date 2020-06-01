@@ -3641,7 +3641,7 @@ BOOST_AUTO_TEST_CASE(evm_exceptions_in_constructor_out_of_baund)
 			}
 		}
 	)";
-	ABI_CHECK(compileAndRunWithoutCheck(sourceCode, 0, "A"), encodeArgs());
+	ABI_CHECK(compileAndRunWithoutCheck(sourceCode, 0, "A").evmBytecode, encodeArgs());
 	BOOST_CHECK(!m_transactionSuccessful);
 }
 

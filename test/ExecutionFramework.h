@@ -23,6 +23,7 @@
 #pragma once
 
 #include <test/Common.h>
+#include <test/ContractBytecode.h>
 
 #include <libsolidity/interface/OptimiserSettings.h>
 #include <libsolidity/interface/DebugSettings.h>
@@ -39,6 +40,7 @@
 namespace solidity::test
 {
 class EVMHost;
+class EVMHosts;
 
 using rational = boost::rational<bigint>;
 /// An Ethereum address: 20 bytes.
@@ -60,7 +62,7 @@ public:
 	explicit ExecutionFramework(langutil::EVMVersion _evmVersion, std::vector<boost::filesystem::path> const& _evmPaths = {});
 	virtual ~ExecutionFramework() = default;
 
-	virtual bytes const& compileAndRunWithoutCheck(
+	virtual ContractBytecode const& compileAndRunWithoutCheck(
 		std::string const& _sourceCode,
 		u256 const& _value = 0,
 		std::string const& _contractName = "",
@@ -68,7 +70,7 @@ public:
 		std::map<std::string, Address> const& _libraryAddresses = std::map<std::string, Address>()
 	) = 0;
 
-	bytes const& compileAndRun(
+	ContractBytecode const& compileAndRun(
 		std::string const& _sourceCode,
 		u256 const& _value = 0,
 		std::string const& _contractName = "",
@@ -76,15 +78,16 @@ public:
 		std::map<std::string, Address> const& _libraryAddresses = std::map<std::string, Address>()
 	)
 	{
-		compileAndRunWithoutCheck(_sourceCode, _value, _contractName, _arguments, _libraryAddresses);
+		m_contractBytecode = compileAndRunWithoutCheck(_sourceCode, _value, _contractName, _arguments, _libraryAddresses);
 		BOOST_REQUIRE(m_transactionSuccessful);
-		BOOST_REQUIRE(!m_output.empty());
-		return m_output;
+		BOOST_REQUIRE(!m_contractBytecode.empty());
+		// TODO: check ewasm bytecode, if ewasm vm is used
+		return m_contractBytecode;
 	}
 
 	bytes const& callFallbackWithValue(u256 const& _value)
 	{
-		sendMessage(bytes(), false, _value);
+		sendMessage(bytes(), _value);
 		return m_output;
 	}
 
@@ -95,14 +98,14 @@ public:
 
 	bytes const& callLowLevel(bytes const& _data, u256 const& _value)
 	{
-		sendMessage(_data, false, _value);
+		sendMessage(_data, _value);
 		return m_output;
 	}
 
 	bytes const& callContractFunctionWithValueNoEncoding(std::string _sig, u256 const& _value, bytes const& _arguments)
 	{
 		util::FixedHash<4> hash(util::keccak256(_sig));
-		sendMessage(hash.asBytes() + _arguments, false, _value);
+		sendMessage(hash.asBytes() + _arguments, _value);
 		return m_output;
 	}
 
@@ -253,7 +256,8 @@ private:
 protected:
 	void reset();
 
-	void sendMessage(bytes const& _data, bool _isCreation, u256 const& _value = 0);
+	void sendCreationMessage(ContractBytecode const& _contractBytecode, bytes const& _arguments, u256 const& _value = 0);
+	void sendMessage(bytes const& _data, u256 const& _value = 0);
 	void sendEther(Address const& _to, u256 const& _value);
 	size_t currentTimestamp();
 	size_t blockTimestamp(u256 _number);
@@ -275,7 +279,7 @@ protected:
 	solidity::frontend::RevertStrings m_revertStrings = solidity::frontend::RevertStrings::Default;
 	solidity::frontend::OptimiserSettings m_optimiserSettings = solidity::frontend::OptimiserSettings::minimal();
 	bool m_showMessages = false;
-	std::shared_ptr<EVMHost> m_evmHost;
+	std::shared_ptr<EVMHosts> m_evmHost;
 
 	bool m_transactionSuccessful = true;
 	Address m_sender = account(0);
@@ -283,6 +287,7 @@ protected:
 	u256 const m_gasPrice = 100 * szabo;
 	u256 const m_gas = 100000000;
 	bytes m_output;
+	ContractBytecode m_contractBytecode;
 	u256 m_gasUsed;
 };
 

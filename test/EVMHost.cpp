@@ -53,10 +53,10 @@ evmc::VM& EVMHost::getVM(string _path)
 		auto vm = evmc_load_and_configure(_path.c_str(), &errorCode);
 		if (vm && errorCode == EVMC_LOADER_SUCCESS)
 		{
-			if (vm->get_capabilities(vm) & EVMC_CAPABILITY_EVM1)
+			if (vm->get_capabilities(vm) & (EVMC_CAPABILITY_EVM1 | EVMC_CAPABILITY_EWASM))
 				vms[_path] = std::make_unique<evmc::VM>(vm);
 			else
-				cerr << "VM loaded does not support EVM1" << endl;
+				cerr << "VM loaded does not support EVM1 or EWASM" << endl;
 		}
 		else
 		{
@@ -83,6 +83,9 @@ EVMHost::EVMHost(langutil::EVMVersion _evmVersion, evmc::VM& _vm):
 		cerr << "Unable to load evmc library" << endl;
 		assertThrow(false, Exception, "");
 	}
+
+	m_evm = m_vm.has_capability(EVMC_CAPABILITY_EVM1);
+	m_ewasm = m_vm.has_capability(EVMC_CAPABILITY_EWASM);
 
 	if (_evmVersion == langutil::EVMVersion::homestead())
 		m_evmRevision = EVMC_HOMESTEAD;
@@ -231,7 +234,7 @@ evmc::result EVMHost::call(evmc_message const& _message) noexcept
 
 	evmc::address currentAddress = m_currentAddress;
 	m_currentAddress = message.destination;
-	evmc::result result = m_vm.execute(*this, m_evmRevision, message, code.data(), code.size());
+	evmc::result result = execute(*this, m_evmRevision, message, code.data(), code.size());
 	m_currentAddress = currentAddress;
 
 	if (message.kind == EVMC_CREATE || message.kind == EVMC_CREATE2)

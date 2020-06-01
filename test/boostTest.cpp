@@ -150,7 +150,7 @@ test_suite* init_unit_test_suite( int /*argc*/, char* /*argv*/[] )
 
 	initializeOptions();
 
-	bool disableSemantics = !solidity::test::EVMHosts::LibrariesReady(solidity::test::CommonOptions::get().evmcPaths);
+	bool disableSemantics = !solidity::test::EVMHosts::PreloadEvmcLibraries(solidity::test::CommonOptions::get().evmcPaths);
 	if (disableSemantics)
 	{
 		cout << "Unable to find " << solidity::test::evmoneFilename << ". Please provide the path using -- --evmonepath <path>." << endl;

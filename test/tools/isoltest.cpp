@@ -428,7 +428,7 @@ int main(int argc, char const *argv[])
 
 	auto& options = dynamic_cast<solidity::test::IsolTestOptions const&>(solidity::test::CommonOptions::get());
 
-	bool disableSemantics = !solidity::test::EVMHosts::LibrariesReady(solidity::test::CommonOptions::get().evmcPaths);
+	bool disableSemantics = !solidity::test::EVMHosts::PreloadEvmcLibraries(solidity::test::CommonOptions::get().evmcPaths);
 	if (disableSemantics)
 	{
 		cout << "Unable to find " << solidity::test::evmoneFilename << ". Please provide the path using --evmonepath <path>." << endl;

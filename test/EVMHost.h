@@ -21,15 +21,19 @@
 
 #pragma once
 
-#include <test/evmc/mocked_host.hpp>
-#include <test/evmc/evmc.hpp>
 #include <test/evmc/evmc.h>
+#include <test/evmc/evmc.hpp>
+#include <test/evmc/mocked_host.hpp>
 
 #include <liblangutil/EVMVersion.h>
+#include <liblangutil/Exceptions.h>
 
 #include <libsolutil/FixedHash.h>
 
 #include <boost/filesystem/path.hpp>
+
+#include <map>
+#include <string>
 
 namespace solidity::test
 {
@@ -48,11 +52,16 @@ public:
 
 	explicit EVMHost(langutil::EVMVersion _evmVersion, evmc::VM& _vm = getVM());
 
+	virtual bool executesEvmBytecode() const { return m_evm; }
+
+	virtual bool executesEwasmBytecode() const { return m_ewasm; }
+
 	virtual void reset()
 	{
 		accounts.clear();
 		m_currentAddress = {};
 	}
+
 	virtual void newBlock()
 	{
 		tx_context.block_number++;
@@ -65,6 +74,12 @@ public:
 		return evmc::MockedHost::account_exists(_addr);
 	}
 
+	virtual evmc::result execute(
+		evmc::Host& host, evmc_revision rev, const evmc_message& msg, const uint8_t* code, size_t code_size) noexcept
+	{
+		return m_vm.execute(Host::get_interface(), host.to_context(), rev, msg, code, code_size);
+	}
+
 	void selfdestruct(evmc::address const& _addr, evmc::address const& _beneficiary) noexcept override;
 
 	evmc::result call(evmc_message const& _message) noexcept override;
@@ -75,6 +90,13 @@ public:
 	static evmc::address convertToEVMC(Address const& _addr);
 	static util::h256 convertFromEVMC(evmc::bytes32 const& _data);
 	static evmc::bytes32 convertToEVMC(util::h256 const& _data);
+
+	std::string toString() const
+	{
+		std::stringstream result;
+		result << m_vm.name() << " " << m_vm.version() << " @ " << std::hex << &m_vm;
+		return result.str();
+	}
 
 private:
 	evmc::address m_currentAddress = {};
@@ -97,6 +119,10 @@ private:
 	langutil::EVMVersion m_evmVersion;
 	// EVM version requested from EVMC (matches the above)
 	evmc_revision m_evmRevision;
+
+protected:
+	bool m_ewasm;
+	bool m_evm;
 };
 
 class EVMHosts: public EVMHost
@@ -109,29 +135,57 @@ public:
 		{
 			evmc::VM& vm = EVMHost::getVM(path.string());
 			if (vm)
-				m_evmHosts.emplace_back(std::make_shared<EVMHost>(_evmVersion, vm));
+			{
+				auto evmHost = std::make_shared<EVMHost>(_evmVersion, vm);
+				m_ewasm|= evmHost->executesEwasmBytecode();
+				m_evm |= evmHost->executesEvmBytecode();
+				m_evmHosts.emplace_back(evmHost);
+			}
 		}
 	}
 
-	static bool LibrariesReady(std::vector<boost::filesystem::path> const& _paths)
+	static bool PreloadEvmcLibraries(std::vector<boost::filesystem::path> const& _paths)
 	{
 		bool success = true;
 		for (auto const& path: _paths)
-			if (!solidity::test::EVMHost::getVM(path.string()))
+		{
+			evmc::VM& vm = solidity::test::EVMHost::getVM(path.string());
+			if (!vm)
 				success = false;
+		}
 		return success && !_paths.empty();
+	}
+
+	void forEach(std::function<void(EVMHost&)> _function)
+	{
+		for (auto& host: m_evmHosts)
+			_function(*host);
+	}
+
+	template<typename T>
+	T forEach(std::function<T(EVMHost&)> _function)
+	{
+		std::map<std::shared_ptr<EVMHost>, T> results;
+		for (auto& host: m_evmHosts)
+			results.insert(std::make_pair(host, _function(*host)));
+
+		bool error = false;
+		//		for (auto& result: results)
+		//			if (result.second != results.begin()->second)
+		//				error = true;
+
+		solAssert(!error, "");
+		return T{std::move(results.begin()->second)};
 	}
 
 	void reset() override
 	{
-		for (auto& host: m_evmHosts)
-			host->reset();
+		forEach([](EVMHost& _host) { _host.reset(); });
 	}
 
 	void newBlock() override
 	{
-		for (auto& host: m_evmHosts)
-			host->newBlock();
+		forEach([](EVMHost& _host) { _host.newBlock(); });
 	}
 
 	bool account_exists(evmc::address const& _addr) const noexcept override
@@ -144,30 +198,30 @@ public:
 
 	void selfdestruct(evmc::address const& _addr, evmc::address const& _beneficiary) noexcept override
 	{
-		for (auto& host: m_evmHosts)
-			host->selfdestruct(_addr, _beneficiary);
+		forEach([&](EVMHost& _host) { _host.selfdestruct(_addr, _beneficiary); });
 	}
 
 	evmc::result call(evmc_message const& _message) noexcept override
 	{
-		bool error = false;
-		std::vector<evmc::result> results;
+		return forEach<evmc::result>([&](EVMHost& _host) -> evmc::result { return _host.call(_message); });
+	}
 
-		for (auto& host: m_evmHosts)
-			results.push_back(host->call(_message));
-
-		// check results
-		for (auto& result: results)
-			if (result.status_code != results.begin()->status_code)
-				error = true;
-
-		if (!error)
-			return evmc::result(std::move(*results.begin()));
-
-		return evmc::result(evmc_status_code::EVMC_INTERNAL_ERROR, 0, nullptr, 0);
+	evmc::result execute(
+		evmc::Host& host,
+		evmc_revision rev,
+		const evmc_message& msg,
+		const uint8_t* code,
+		size_t code_size) noexcept override
+	{
+		return forEach<evmc::result>(
+			[&](EVMHost& _host) -> evmc::result { return _host.execute(host, rev, msg, code, code_size); });
 	}
 
 	evmc::bytes32 get_block_hash(int64_t number) const noexcept override { return EVMHost::get_block_hash(number); }
+
+	size_t size() const {
+		return m_evmHosts.size();
+	}
 
 private:
 	std::vector<std::shared_ptr<EVMHost>> m_evmHosts;
