@@ -622,7 +622,7 @@ void IRGeneratorForStatements::endVisit(FunctionCall const& _functionCall)
 			});
 
 			solAssert(it != callArgumentNames.cend(), "");
-			arguments.push_back(callArguments[std::distance(callArgumentNames.begin(), it)]);
+			arguments.push_back(callArguments[static_cast<size_t>(std::distance(callArgumentNames.begin(), it))]);
 		}
 
 	if (auto memberAccess = dynamic_cast<MemberAccess const*>(&_functionCall.expression()))
@@ -1046,7 +1046,7 @@ void IRGeneratorForStatements::endVisit(FunctionCall const& _functionCall)
 	case FunctionType::Kind::Log3:
 	case FunctionType::Kind::Log4:
 	{
-		unsigned logNumber = int(functionType->kind()) - int(FunctionType::Kind::Log0);
+		unsigned logNumber = static_cast<unsigned>(functionType->kind()) - static_cast<unsigned>(FunctionType::Kind::Log0);
 		solAssert(arguments.size() == logNumber + 1, "");
 		ABIFunctions abi(m_context.evmVersion(), m_context.revertStrings(), m_context.functionCollector());
 		string indexedArgs;

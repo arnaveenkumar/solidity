@@ -121,10 +121,10 @@ TestCase::TestResult SMTCheckerJSONTest::run(ostream& _stream, string const& _li
 			std::string sourceName;
 			if (location.isMember("source") && location["source"].isString())
 				sourceName = location["source"].asString();
-			if (start >= static_cast<int>(preamble.size()))
-				start -= preamble.size();
-			if (end >= static_cast<int>(preamble.size()))
-				end -= preamble.size();
+			if (static_cast<size_t>(start) >= preamble.size())
+				start -= static_cast<int>(preamble.size());
+			if (static_cast<size_t>(end) >= preamble.size())
+				end -= static_cast<int>(preamble.size());
 			m_errorList.emplace_back(SyntaxTestError{
 				error["type"].asString(),
 				error["message"].asString(),

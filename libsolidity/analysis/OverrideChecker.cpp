@@ -110,27 +110,30 @@ struct CutVertexFinder
 private:
 	OverrideGraph const& m_graph;
 
-	std::vector<bool> m_visited = std::vector<bool>(m_graph.numNodes, false);
-	std::vector<int> m_depths = std::vector<int>(m_graph.numNodes, -1);
-	std::vector<int> m_low = std::vector<int>(m_graph.numNodes, -1);
-	std::vector<int> m_parent = std::vector<int>(m_graph.numNodes, -1);
+	std::vector<bool> m_visited = std::vector<bool>(static_cast<size_t>(m_graph.numNodes), false);
+	std::vector<int> m_depths = std::vector<int>(static_cast<size_t>(m_graph.numNodes), -1);
+	std::vector<int> m_low = std::vector<int>(static_cast<size_t>(m_graph.numNodes), -1);
+	std::vector<int> m_parent = std::vector<int>(static_cast<size_t>(m_graph.numNodes), -1);
 	std::set<OverrideProxy> m_cutVertices{};
 
-	void run(int _u = 0, int _depth = 0)
+	void run(size_t _u = 0, size_t _depth = 0)
 	{
 		m_visited.at(_u) = true;
-		m_depths.at(_u) = m_low.at(_u) = _depth;
-		for (int v: m_graph.edges.at(_u))
-			if (!m_visited.at(v))
+		m_depths.at(_u) = m_low.at(_u) = static_cast<int>(_depth);
+		for (int const v: m_graph.edges.at(static_cast<int>(_u)))
+		{
+			auto const vInd = static_cast<size_t>(v);
+			if (!m_visited.at(vInd))
 			{
-				m_parent[v] = _u;
-				run(v, _depth + 1);
-				if (m_low[v] >= m_depths[_u] && m_parent[_u] != -1)
-					m_cutVertices.insert(m_graph.nodeInv.at(_u));
-				m_low[_u] = min(m_low[_u], m_low[v]);
+				m_parent[vInd] = static_cast<int>(_u);
+				run(vInd, _depth + 1);
+				if (m_low[vInd] >= m_depths[_u] && m_parent[_u] != -1)
+					m_cutVertices.insert(m_graph.nodeInv.at(static_cast<int>(_u)));
+				m_low[_u] = min(m_low[_u], m_low[vInd]);
 			}
 			else if (v != m_parent[_u])
-				m_low[_u] = min(m_low[_u], m_depths[v]);
+				m_low[_u] = min(m_low[_u], m_depths[vInd]);
+		}
 	}
 };
 
@@ -213,7 +216,7 @@ bool OverrideProxy::CompareBySignature::operator()(OverrideProxy const& _a, Over
 size_t OverrideProxy::id() const
 {
 	return std::visit(GenericVisitor{
-		[&](auto const* _item) -> size_t { return _item->id(); }
+		[&](auto const* _item) -> size_t { return static_cast<size_t>(_item->id()); }
 	}, m_item);
 }
 
