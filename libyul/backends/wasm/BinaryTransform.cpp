@@ -274,7 +274,7 @@ bytes BinaryTransform::run(Module const& _module)
 
 bytes BinaryTransform::operator()(Literal const& _literal)
 {
-	return toBytes(Opcode::I64Const) + lebEncodeSigned(_literal.value);
+	return toBytes(Opcode::I64Const) + lebEncodeSigned(int64_t(_literal.value));
 }
 
 bytes BinaryTransform::operator()(StringLiteral const&)
@@ -300,12 +300,12 @@ bytes BinaryTransform::operator()(BuiltinCall const& _call)
 	if (_call.functionName == "dataoffset")
 	{
 		string name = std::get<StringLiteral>(_call.arguments.at(0)).value;
-		return toBytes(Opcode::I64Const) + lebEncodeSigned(m_subModulePosAndSize.at(name).first);
+		return toBytes(Opcode::I64Const) + lebEncodeSigned(int64_t(m_subModulePosAndSize.at(name).first));
 	}
 	else if (_call.functionName == "datasize")
 	{
 		string name = std::get<StringLiteral>(_call.arguments.at(0)).value;
-		return toBytes(Opcode::I64Const) + lebEncodeSigned(m_subModulePosAndSize.at(name).second);
+		return toBytes(Opcode::I64Const) + lebEncodeSigned(int64_t(m_subModulePosAndSize.at(name).second));
 	}
 
 	bytes args = visit(_call.arguments);
